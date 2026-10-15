@@ -1,4 +1,5 @@
 import {configuredGroup} from '../insight-context.ts';
+import {zApiSettings} from '../z-api.ts';
 import type {ServerEnv} from '../context';
 import {getDoc} from '../db.ts';
 import {cachedIntegration} from '../integration-cache.ts';
@@ -30,7 +31,8 @@ export async function readWhatsAppMessages(env:ServerEnv,principal:OperationPrin
  if(!await whatsappSourceAvailable(env))throw new OperationError(503,'whatsapp_not_configured','Fonte de conversas do WhatsApp não configurada.');
  let before;try{before=parseMessageCursor(input.before);}catch{invalid('Página inválida.');}
  if(input.refresh!==undefined&&typeof input.refresh!=='boolean')invalid('Atualização inválida.');
- const key=JSON.stringify(['whatsapp',env.SUPABASE_URL,env.WHATSAPP_TABLE,env.WHATSAPP_GROUP_COLUMN,env.WHATSAPP_GROUP_NAME_COLUMN,group.id??'',group.name??'',before]);
+ const localSource=group.id?.startsWith('z-api:')?await zApiSettings(env):null;
+ const key=JSON.stringify(['whatsapp',company,localSource?.instance_id,localSource?.updated_at,env.SUPABASE_URL,env.WHATSAPP_TABLE,env.WHATSAPP_GROUP_COLUMN,env.WHATSAPP_GROUP_NAME_COLUMN,group.id??'',group.name??'',before]);
  let cached;
  try{cached=await cachedIntegration(db,workspace,key,()=>fetchHistoryPage(env,group,before),{ttl:before?900000:60000,staleFor:86400000,force:input.refresh===true});}
  catch{throw new OperationError(502,'whatsapp_unavailable','Não foi possível consultar a conversa. Tente novamente.');}
