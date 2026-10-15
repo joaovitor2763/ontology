@@ -31,3 +31,54 @@ test('authorized WhatsApp API cache is partitioned by client when a Z-API channe
  await saveZApiConfig(env,{...input,mappings:[{channel:'5511999999999',company:'banco-litoral'}]});
  const second=await read('banco-litoral');assert.equal(second.status,200,await second.clone().text());assert.equal((await second.json()).data.messages.length,0);
 });
+
+test('Z-API preserves image/video captions alongside text and allowlisted metadata',()=>{
+ for(const type of ['image','video']){
+  const message=parseZApiMessage(payload({text:{message:'Contexto separado'},[type]:{caption:'Legenda sintética',mimeType:type+'/TEST; parameter=discard',width:600,height:315,seconds:13,[type+'Url']:'https://private.test/never-store',thumbnailUrl:'https://private.test/thumbnail'}}));
+  assert.equal(message.attachment.type,type);assert.equal(message.attachment.caption,'Legenda sintética');
+  assert.equal(message.attachment.mimeType,type+'/test');assert.equal(message.attachment.width,600);
+  assert.match(message.text,/Contexto separado/);assert.match(message.text,/Legenda sintética/);
+  assert.equal(JSON.stringify(message).includes('private.test'),false);
+ }
+});
+test('Z-API normalizes document filenames, voice-note durations and sticker types',()=>{
+ const doc=parseZApiMessage(payload({text:undefined,document:{fileName:'../../pasta/relatório.pdf',title:'Relatório de exemplo',pageCount:3,caption:'Revisão necessária',mimeType:'application/pdf',documentUrl:'https://private.test/document',token:'never-store'}}));
+ assert.deepEqual(doc.attachment,{type:'document',caption:'Revisão necessária',fileName:'relatório.pdf',title:'Relatório de exemplo',mimeType:'application/pdf',pageCount:3});
+ assert.match(doc.text,/relatório.pdf/);assert.match(doc.text,/Revisão necessária/);
+ const audio=parseZApiMessage(payload({text:undefined,audio:{seconds:10,ptt:true,mimeType:'audio/ogg; codecs=opus',audioUrl:'https://private.test/audio'}}));
+ assert.deepEqual(audio.attachment,{type:'audio',mimeType:'audio/ogg',durationSeconds:10,isVoiceNote:true});assert.match(audio.text,/10s/);
+ const sticker=parseZApiMessage(payload({text:undefined,sticker:{mimeType:'image/webp',stickerUrl:'https://private.test/sticker'}}));
+ assert.deepEqual(sticker.attachment,{type:'sticker',mimeType:'image/webp'});
+ assert.equal(JSON.stringify([doc,audio,sticker]).includes('private.test'),false);
+});
+test('Z-API metadata rejects malformed fields and bounds natural-language descriptions',()=>{
+ const bad=parseZApiMessage(payload({text:undefined,audio:{caption:'a'.repeat(10000),fileName:'x'.repeat(1000),title:{bad:true},mimeType:'bad mime',seconds:-2,ptt:'true',width:Infinity,height:0,pageCount:1.5,thumbnailUrl:'ignored'}}));
+ assert.equal(bad.attachment.caption.length,8000);assert.equal(bad.attachment.fileName.length,255);
+ for(const field of ['title','mimeType','durationSeconds','isVoiceNote','width','height','pageCount'])assert.equal(field in bad.attachment,false);
+ assert.equal(parseZApiMessage(payload({text:undefined,image:'not-an-object'})),null);
+ assert.equal(parseZApiMessage(payload({text:undefined,image:[]})),null);
+ assert.equal(parseZApiMessage(payload({text:undefined,image:null})),null);
+ assert.equal(parseZApiMessage(payload({text:undefined,image:{caption:'Legenda\u0000\u202e ok'}})).attachment.caption,'Legenda ok');
+ assert.equal(parseZApiMessage(payload()).attachment,undefined);
+});
+test('Z-API metadata survives history and job imports without URLs or duplicate overwrite',async()=>{
+ const f=await fixture();const event=payload({text:undefined,image:{caption:'Legenda original',mimeType:'image/jpeg',imageUrl:'https://private.test/image',thumbnailUrl:'https://private.test/thumb',unknown:{secret:'never-store'}}});
+ await receiveZApi(f.env,f.secret,event);await receiveZApi(f.env,f.secret,{...event,image:{caption:'Não substituir'}});
+ const history=(await zApiHistory(f.env,'5511999999999')).messages[0];
+ const jobs=await zApiMessagePage(f.env,'5511999999999',{since:'2026-09-01T00:00:00Z',until:'2026-09-02T00:00:00Z'});
+ assert.deepEqual(jobs[0].attachment,history.attachment);assert.equal(history.attachment.caption,'Legenda original');
+ const stored=JSON.stringify(f.sql.prepare('SELECT * FROM z_api_messages').all());
+ for(const excluded of ['private.test','never-store','thumbnailUrl','unknown','imageUrl'])assert.equal(stored.includes(excluded),false);
+ await saveZApiConfig(f.env,{...input,mappings:[{channel:'5511999999999',company:'client-two'}]});
+ assert.equal((await zApiHistory(f.env,'5511999999999')).messages.length,0);
+});
+test('additive Z-API migration preserves existing captured messages without inventing metadata',async()=>{
+ const {DatabaseSync}=await import('node:sqlite');const {readFileSync}=await import('node:fs');const sql=new DatabaseSync(':memory:');
+ try{
+  sql.exec(readFileSync('migrations/0045_z_api.sql','utf8'));
+  sql.prepare('INSERT INTO z_api_messages VALUES(?,?,?,?,?,?,?,?,?,?)').run('w','instance','old','channel','client','2026-09-01T00:00:00Z','Pessoa','Texto antigo',0,'2026-09-01T00:00:00Z');
+  sql.exec(readFileSync('migrations/0046_z_api_attachment_metadata.sql','utf8'));
+  const old=sql.prepare('SELECT body,attachment_json FROM z_api_messages').get();assert.equal(old.body,'Texto antigo');assert.equal(old.attachment_json,null);
+  assert.throws(()=>sql.prepare('UPDATE z_api_messages SET attachment_json=?').run('not-json'));
+ }finally{sql.close();}
+});

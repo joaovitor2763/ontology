@@ -56,3 +56,7 @@ Use os testes automatizados e os comandos documentados no [guia de contribuiçã
 - `scripts/deploy.mjs`: provisiona/reutiliza D1 antes das migrações e só então publica o Worker; R2 é provisionado pelo Wrangler. Configurações de login no painel são preservadas por `keep_vars`.
 
 Os testes simulam os provedores. Consentimento OAuth real e entrega Z-API exigem validação pelas contas da empresa instaladora.
+
+### Metadados Z-API (0046)
+
+`WhatsAppMessage.attachment` é opcional: tipo, legenda, nome/título do arquivo, MIME base, duração em segundos, dimensões, páginas e indicador de nota de voz. `z-api.ts` usa allowlist e limites por campo a partir dos [callbacks oficiais](https://developer.z-api.io/en/webhooks/on-message-received-examples), nunca faz download nem persiste URLs/miniaturas/tokens/payload bruto. O texto combina marcador e descrição para manter a interface e as importações/insights existentes úteis. `attachment_json` é nullable e não reconstrói dados históricos ausentes; paginação, isolamento, deduplicação e retenção continuam iguais. A integração Meta permanece fora de escopo.

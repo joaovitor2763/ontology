@@ -1,7 +1,7 @@
 import { readRequestJson } from './connector-body.ts';
 export { readRequestJson } from './connector-body.ts';
 import { seal, unseal } from './google.ts';
-import type { WhatsAppMessage } from '../modules/engagement/application/whatsapp.ts';
+import type { WhatsAppMessage, WhatsAppAttachment } from '../modules/engagement/application/whatsapp.ts';
 export type ZApiEnv = { DB?: D1Database; WORKSPACE_ID?: string; INTEGRATION_SECRET_KEY?: string };
 type Settings = {instance_id:string;credentials_enc:string;webhook_secret_enc:string;webhook_hash:string;enabled:number;updated_at:string};
 export type ChannelMapping = {channel:string;company:string};
@@ -48,6 +48,30 @@ export async function zApiGroup(db:D1Database,workspaceId:string,company:string)
  try {const row=await db.prepare('SELECT c.channel FROM z_api_channels c JOIN z_api_settings s ON s.workspace_id=c.workspace_id WHERE c.workspace_id=? AND c.company=? AND s.enabled=1').bind(workspaceId,company).first<{channel:string}>();return row?{id:`z-api:${row.channel}`}:null;}
  catch(error){if(/no such table: z_api_(?:channels|settings)/.test(String(error)))return null;throw error;}
 }
+const mediaTypes = ['image','audio','video','document','sticker'] as const;
+const object = (value:unknown):Record<string,unknown>|null => value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:null;
+function description(value:unknown,limit:number){
+ if(typeof value!=='string')return undefined;
+ // Keep natural-language text, but never trust controls or bidirectional filename tricks.
+ return value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g,'').trim().slice(0,limit)||undefined;
+}
+function attachmentOf(p:Record<string,unknown>):WhatsAppAttachment|undefined {
+ const type=mediaTypes.find(key=>object(p[key]));if(!type)return undefined;
+ const source=object(p[type])!;const result:WhatsAppAttachment={type};
+ const caption=description(source.caption,8000);if(caption)result.caption=caption;
+ const fileName=description(source.fileName,1024)?.split(/[\\/]/).at(-1)?.slice(0,255);if(fileName)result.fileName=fileName;
+ const title=description(source.title,500);if(title)result.title=title;
+ const mimeType=description(source.mimeType,200)?.split(';')[0].trim().toLowerCase();
+ if(mimeType&&/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(mimeType))result.mimeType=mimeType;
+ if((type==='audio'||type==='video')&&typeof source.seconds==='number'&&Number.isFinite(source.seconds)&&source.seconds>=0&&source.seconds<=86400)result.durationSeconds=source.seconds;
+ for(const field of ['width','height','pageCount'] as const){const n=source[field];if(typeof n==='number'&&Number.isInteger(n)&&n>0&&n<=100000)result[field]=n;}
+ if(type==='audio'&&typeof source.ptt==='boolean')result.isVoiceNote=source.ptt;
+ return result;
+}
+function attachmentText(a:WhatsAppAttachment){
+ const details=[a.fileName??a.title,a.mimeType,a.durationSeconds===undefined?undefined:`${a.durationSeconds}s`,a.pageCount===undefined?undefined:`${a.pageCount} páginas`].filter(Boolean);
+ return [`[Mídia não arquivada: ${a.type}${details.length?'; '+details.join('; '):''}]`,a.caption].filter(Boolean).join('\n');
+}
 export function parseZApiMessage(payload:unknown):Omit<WhatsAppMessage,'group'> & {channel:string}|null {
  if(!payload||typeof payload!=='object')return null;const p=payload as Record<string,unknown>;
  if(p.type!==undefined&&p.type!=='ReceivedCallback')return null;
@@ -56,10 +80,10 @@ export function parseZApiMessage(payload:unknown):Omit<WhatsAppMessage,'group'> 
  const moment=Number(p.momment??p.moment??p.timestamp);if(!Number.isFinite(moment)||moment<=0)return null;
  const millis=moment<1e12?moment*1000:moment;if(millis<Date.UTC(2000,0,1)||millis>Date.now()+3600000)return null;
  const text=p.text&&typeof p.text==='object'?(p.text as {message?:unknown}).message:null;
- const media=['image','audio','video','document','sticker'].find(key=>p[key]);
- if(typeof text!=='string'&&!media)return null;
+ const attachment=attachmentOf(p);
+ if(typeof text!=='string'&&!attachment)return null;
  const sender=p.senderName??p.participantPhone??p.senderPhone??p.phone;
- return {id:p.messageId,channel,at:new Date(millis).toISOString(),from:typeof sender==='string'?sender.slice(0,200):'Participante',text:typeof text==='string'?text.slice(0,16000):`[Mídia não arquivada: ${media}]`,fromMe:p.fromMe};
+ return {id:p.messageId,channel,at:new Date(millis).toISOString(),from:typeof sender==='string'?sender.slice(0,200):'Participante',text:attachment?[typeof text==='string'?text.slice(0,7000):'',attachmentText(attachment)].filter(Boolean).join('\n').slice(0,16000):(text as string).slice(0,16000),fromMe:p.fromMe,...(attachment?{attachment}:{})};
 }
 export async function receiveZApi(env:ZApiEnv,secret:string,payload:unknown){
  const settings=await zApiSettings(env);if(!settings?.enabled||!env.DB||!env.INTEGRATION_SECRET_KEY||! /^[a-f0-9]{64}$/.test(secret))return {status:403,accepted:false};
@@ -68,19 +92,19 @@ export async function receiveZApi(env:ZApiEnv,secret:string,payload:unknown){
  const message=parseZApiMessage(payload);if(!message)return {status:202,accepted:false};
  const mapping=await env.DB.prepare('SELECT company FROM z_api_channels WHERE workspace_id=? AND channel=?').bind(workspace(env),message.channel).first<{company:string}>();if(!mapping)return {status:202,accepted:false};
  // Conditional insert rechecks activation, instance and channel in the same statement as persistence.
- await env.DB.prepare('INSERT OR IGNORE INTO z_api_messages(workspace_id,instance_id,message_id,channel,company,at,sender,body,from_me,received_at) SELECT ?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM z_api_settings s JOIN z_api_channels c ON c.workspace_id=s.workspace_id WHERE s.workspace_id=? AND s.enabled=1 AND s.instance_id=? AND s.webhook_hash=? AND c.channel=? AND c.company=?)').bind(workspace(env),settings.instance_id,message.id,message.channel,mapping.company,message.at,message.from,message.text,message.fromMe?1:0,new Date().toISOString(),workspace(env),settings.instance_id,settings.webhook_hash,message.channel,mapping.company).run();
+ await env.DB.prepare('INSERT OR IGNORE INTO z_api_messages(workspace_id,instance_id,message_id,channel,company,at,sender,body,from_me,received_at,attachment_json) SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM z_api_settings s JOIN z_api_channels c ON c.workspace_id=s.workspace_id WHERE s.workspace_id=? AND s.enabled=1 AND s.instance_id=? AND s.webhook_hash=? AND c.channel=? AND c.company=?)').bind(workspace(env),settings.instance_id,message.id,message.channel,mapping.company,message.at,message.from,message.text,message.fromMe?1:0,new Date().toISOString(),message.attachment?JSON.stringify(message.attachment):null,workspace(env),settings.instance_id,settings.webhook_hash,message.channel,mapping.company).run();
  return {status:200,accepted:true};
 }
-type Stored = {message_id:string;at:string;sender:string;body:string;from_me:number;channel:string};
-const asMessage=(row:Stored):WhatsAppMessage=>({id:row.message_id,at:row.at,from:row.sender,text:row.body,fromMe:Boolean(row.from_me),group:row.channel});
+type Stored = {message_id:string;at:string;sender:string;body:string;from_me:number;channel:string;attachment_json:string|null};
+const asMessage=(row:Stored):WhatsAppMessage=>({id:row.message_id,at:row.at,from:row.sender,text:row.body,fromMe:Boolean(row.from_me),group:row.channel,...(row.attachment_json?{attachment:JSON.parse(row.attachment_json) as WhatsAppAttachment}:{})});
 export async function zApiHistory(env:ZApiEnv,channel:string,before:{at:string;id:string}|null=null){
  if(!env.DB||!await zApiEnabled(env))throw new Error('Z-API não está ativa.');
- const rows=(await env.DB.prepare('SELECT message_id,at,sender,body,from_me,channel FROM z_api_messages WHERE workspace_id=? AND instance_id=(SELECT instance_id FROM z_api_settings WHERE workspace_id=?) AND channel=? AND company=(SELECT company FROM z_api_channels WHERE workspace_id=? AND channel=?) AND (? IS NULL OR at<? OR (at=? AND message_id<?)) ORDER BY at DESC,message_id DESC LIMIT 51').bind(workspace(env),workspace(env),channel,workspace(env),channel,before?.at??null,before?.at??null,before?.at??null,before?.id??null).all<Stored>()).results;
+ const rows=(await env.DB.prepare('SELECT message_id,at,sender,body,from_me,channel,attachment_json FROM z_api_messages WHERE workspace_id=? AND instance_id=(SELECT instance_id FROM z_api_settings WHERE workspace_id=?) AND channel=? AND company=(SELECT company FROM z_api_channels WHERE workspace_id=? AND channel=?) AND (? IS NULL OR at<? OR (at=? AND message_id<?)) ORDER BY at DESC,message_id DESC LIMIT 51').bind(workspace(env),workspace(env),channel,workspace(env),channel,before?.at??null,before?.at??null,before?.at??null,before?.id??null).all<Stored>()).results;
  const page=rows.slice(0,50);const last=page.at(-1);return {messages:page.map(asMessage).reverse(),nextCursor:rows.length>50&&last?JSON.stringify({at:last.at,id:last.message_id}):null};
 }
 export async function zApiMessagePage(env:ZApiEnv,channel:string,range:{since:string;until:string;at?:string|null;id?:string|null}){
  if(!env.DB||!await zApiEnabled(env))throw new Error('Z-API não está ativa.');
- const rows=(await env.DB.prepare('SELECT message_id,at,sender,body,from_me,channel FROM z_api_messages WHERE workspace_id=? AND instance_id=(SELECT instance_id FROM z_api_settings WHERE workspace_id=?) AND channel=? AND company=(SELECT company FROM z_api_channels WHERE workspace_id=? AND channel=?) AND at>=? AND at<=? AND (? IS NULL OR at>? OR (at=? AND message_id>?)) ORDER BY at,message_id LIMIT 100').bind(workspace(env),workspace(env),channel,workspace(env),channel,new Date(range.since).toISOString(),new Date(range.until).toISOString(),range.at?new Date(range.at).toISOString():null,range.at?new Date(range.at).toISOString():null,range.at?new Date(range.at).toISOString():null,range.id??null).all<Stored>()).results;
+ const rows=(await env.DB.prepare('SELECT message_id,at,sender,body,from_me,channel,attachment_json FROM z_api_messages WHERE workspace_id=? AND instance_id=(SELECT instance_id FROM z_api_settings WHERE workspace_id=?) AND channel=? AND company=(SELECT company FROM z_api_channels WHERE workspace_id=? AND channel=?) AND at>=? AND at<=? AND (? IS NULL OR at>? OR (at=? AND message_id>?)) ORDER BY at,message_id LIMIT 100').bind(workspace(env),workspace(env),channel,workspace(env),channel,new Date(range.since).toISOString(),new Date(range.until).toISOString(),range.at?new Date(range.at).toISOString():null,range.at?new Date(range.at).toISOString():null,range.at?new Date(range.at).toISOString():null,range.id??null).all<Stored>()).results;
  return rows.map(asMessage);
 }
 export async function pruneZApi(env:ZApiEnv){if(env.DB)await env.DB.prepare('DELETE FROM z_api_messages WHERE received_at<?').bind(new Date(Date.now()-Z_API_RETENTION_DAYS*86400000).toISOString()).run();}

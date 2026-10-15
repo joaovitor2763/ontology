@@ -3,6 +3,20 @@
  * Supabase table filled by the WhatsApp integration). Read-only: the app never
  * writes to the group. Column names vary per base, so the mapping is explicit.
  */
+/** Descriptive metadata only: no media URL, thumbnail, download token or binary. */
+export type WhatsAppAttachment = {
+  type: 'image' | 'audio' | 'video' | 'document' | 'sticker';
+  caption?: string;
+  fileName?: string;
+  title?: string;
+  mimeType?: string;
+  durationSeconds?: number;
+  width?: number;
+  height?: number;
+  pageCount?: number;
+  isVoiceNote?: boolean;
+};
+
 export type WhatsAppMessage = {
   id: string;
   /** ISO instant. */
@@ -11,6 +25,7 @@ export type WhatsAppMessage = {
   text: string;
   fromMe: boolean;
   group: string;
+  attachment?: WhatsAppAttachment;
 };
 
 export type WhatsAppColumns = {

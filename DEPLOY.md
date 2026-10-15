@@ -66,7 +66,7 @@ Abra **Configurações → Integrações**. Os tokens dos provedores são inform
 - O administrador informa instância e tokens no formulário e ativa o recebimento.
 - Copie a URL de webhook gerada pelo app para o painel da Z-API e vincule o número por QR conforme o provedor.
 - Associe explicitamente grupos/números aos clientes. O banco próprio passa a guardar texto e metadados das mensagens novas, com deduplicação.
-- Retém mensagens por 90 dias. Não importa histórico anterior à ativação, não envia mensagens e não arquiva mídia neste primeiro corte. Mídia aparece apenas indicada; não dependa do link do provedor como arquivo permanente.
+- Retém mensagens por 90 dias. Não importa histórico anterior à ativação, não envia mensagens e não arquiva mídia neste primeiro corte. Mídia aparece indicada com legenda, nome/título do arquivo, MIME, duração e dimensões/quantidade de páginas quando disponíveis. Esses campos também ficam em `attachment` nas mensagens retornadas; áudio indica se é nota de voz. Não são guardados URLs, miniaturas, tokens ou arquivos binários. Não há transcrição/OCR nem integração Meta. Não dependa do link do provedor como arquivo permanente. A migração aditiva `0046` mantém mensagens antigas inalteradas, sem reconstruir metadados que nunca foram capturados.
 - **Cloudflare Access:** crie uma exceção somente para o caminho exato desse webhook. A Z-API não consegue passar pelo login interativo. O app exige segredo exclusivo e valida a instância; não abra `/api/*` nem o app inteiro.
 - A base Supabase continua alternativa para quem já a utiliza. Configure apenas grupos consentidos; defina sua política de retenção/eliminação e responsabilidades LGPD antes de capturar conversas.
 
