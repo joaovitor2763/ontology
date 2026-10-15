@@ -1,0 +1,2 @@
+import { composioGuard } from "@/server/composio-route";import { json } from "@/server/context";
+export async function GET(request:Request){const c=await composioGuard(request);if("error" in c)return c.error;const rows=await c.db.prepare("SELECT toolkit_slug,status,created_at FROM composio_connections WHERE workspace_id=? AND member_id=? ORDER BY toolkit_slug").bind(c.workspace,c.member.id).all();return json({connections:rows.results??[]});}

@@ -1,0 +1,69 @@
+name: quality
+
+# Segurança, qualidade e padrão. Não roda a cada commit: entra em pull request para main
+# (segredos vazados e dependências novas), toda segunda-feira (auditoria completa) e sob demanda.
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: Segredos no histórico
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks CLI · histórico completo
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo:ro" -w /repo \
+            ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            git --no-banner --redact --log-opts="--all" .
+
+  dependencies:
+    name: Vulnerabilidades em dependências
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.title, 'depend') || github.event.pull_request.user.login == 'dependabot[bot]' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: npm audit (alta ou crítica falha)
+        run: npm audit --audit-level=high
+
+  standards:
+    name: Padrão do repositório
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Arquitetura, páginas finas e limites entre camadas
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/architecture.test.mjs tests/permissions.test.mjs
+      - name: AGENTS.md e CLAUDE.md espelhados em cada área
+        run: |
+          set -e
+          for f in $(git ls-files '*AGENTS.md'); do
+            d=$(dirname "$f")
+            [ -f "$d/CLAUDE.md" ] || { echo "faltou $d/CLAUDE.md"; exit 1; }
+            grep -qx '@AGENTS.md' "$d/CLAUDE.md" || { echo "$d/CLAUDE.md precisa ser só @AGENTS.md"; exit 1; }
+          done
+          echo "ok: $(git ls-files '*AGENTS.md' | wc -l) pares"
+      - name: Nenhum segredo em arquivos versionados
+        run: |
+          ! git grep -nE 'GOCSP[X]-|sb[_]secret_|eyJhbGciO[i]' -- ':!*.md' || { echo "segredo versionado"; exit 1; }

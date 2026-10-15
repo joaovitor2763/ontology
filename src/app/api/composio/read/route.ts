@@ -1,0 +1,3 @@
+import {readRequestJson} from "@/server/connector-body";
+import { composioGuard,readOwn,publicError } from "@/server/composio-route";import { toolkit } from "@/server/composio";import { json,problem } from "@/server/context";
+export async function POST(request:Request){const c=await composioGuard(request,true);if("error" in c)return c.error;try{const b=await readRequestJson(request,1024) as {toolkit?:unknown;kind?:unknown};if(!toolkit(b.toolkit))return problem(400,"Toolkit inválido.");if(b.kind!==undefined&&b.kind!=="mail"&&b.kind!=="calendar")return problem(400,"Tipo de consulta inválido.");return json({data:await readOwn(c.env,c.db,c.workspace,c.member.id,b.toolkit,b.kind as "mail"|"calendar"|undefined)});}catch(e){return publicError(e);}}

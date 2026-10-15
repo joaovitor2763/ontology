@@ -1,0 +1,22 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+  [[rules.allowlists]]
+  description = "Known non-secret identifiers and explicit documentation placeholders."
+  regexTarget = "secret"
+  regexes = [
+    '''^ontology\.[a-z0-9.-]+\.v[0-9]+$''',
+    '''^SUA_API_KEY$''',
+    '''^hubspot-deal-123$''',
+  ]
+
+[[rules]]
+id = "curl-auth-header"
+
+  [[rules.allowlists]]
+  description = "Explicit placeholder used in API documentation examples."
+  regexTarget = "secret"
+  regexes = ['''^SUA_API_KEY$''']

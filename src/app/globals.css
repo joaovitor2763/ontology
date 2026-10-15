@@ -1,0 +1,289 @@
+@import "tailwindcss";
+@import "@g4ai/ds/styles.css";
+
+/*
+ * Tokens, base, foco, página, cabeçalho fixo, tabelas responsivas, cards,
+ * drawers e toasts vêm do G4OS-DS (@g4ai/ds/styles.css). Aqui fica só o que é
+ * próprio do Ontology: cabeçalho do cliente, trilho do plano, timeline de
+ * ciclos, agenda e métricas da home. Use sempre os tokens --ds-*.
+ */
+
+/* Figtree vem do next/font (layout.tsx). */
+:root {
+  --ds-font-sans: var(--font-figtree), "Figtree", ui-sans-serif, system-ui, sans-serif;
+}
+
+[data-density="compact"] .agenda-day {
+  padding-block: 2px;
+}
+[data-density="compact"] .agenda-event-summary {
+  padding-block: 8px;
+}
+
+@media (max-width: 1023.98px) {
+  .alert-table tbody tr {
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+  .alert-table td[data-selection] {
+    grid-column: 1;
+    grid-row: 1;
+    padding-top: 1px;
+  }
+  .alert-table td[data-primary] {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .alert-table tbody td:not([data-selection]):not([data-primary]) {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 639.98px) {
+  .home-metric {
+    position: relative;
+    padding-right: 68px;
+  }
+  .home-metric-value {
+    position: absolute;
+    right: 18px;
+    top: 16px;
+    margin-top: 0;
+    font-size: 25px;
+  }
+  .compact-metrics .metric-panel {
+    display: block;
+    padding: 12px 10px;
+  }
+  .compact-metrics .metric-panel > span {
+    display: none;
+  }
+  .compact-metrics .metric-panel > div > div:first-child {
+    min-height: 42px;
+    font-size: 11px;
+  }
+}
+
+.company-tab {
+  transition:
+    color 160ms ease,
+    background-color 160ms ease;
+}
+.company-tab:hover {
+  background: var(--ds-soft);
+}
+.company-content-enter {
+  animation: fade-in 160ms ease;
+}
+
+.timeline-cycle:focus-visible {
+  outline-offset: 1px;
+}
+.timeline-panel [role="region"]:focus-visible {
+  outline-offset: -3px;
+}
+
+.timeline-cycle {
+  container-type: inline-size;
+}
+@container (max-width: 360px) {
+  .timeline-remaining {
+    display: none;
+  }
+}
+@container (max-width: 220px) {
+  .timeline-progress {
+    width: 24px;
+  }
+}
+@container (max-width: 140px) {
+  .timeline-percent,
+  .timeline-progress {
+    display: none;
+  }
+}
+
+.home-scroll {
+  --page-gutter: 20px;
+  overscroll-behavior-y: contain;
+}
+@media (min-width: 640px) {
+  .home-scroll {
+    --page-gutter: 28px;
+  }
+}
+@media (min-width: 1024px) {
+  .home-scroll {
+    --page-gutter: 40px;
+  }
+}
+
+.company-header {
+  --sticky-top: 0px;
+  --page-gutter: 0px;
+  z-index: 30;
+}
+/* Compacts fluidly while the client content scrolls: sizes animate, the
+   description, crumbs and team block fold away, tabs keep their own line. */
+.company-header {
+  transition: padding-top 220ms ease;
+}
+.company-header .company-description {
+  max-height: 80px;
+  overflow: hidden;
+  transition:
+    max-height 220ms ease,
+    opacity 160ms ease,
+    margin 220ms ease;
+}
+.company-header .company-avatar,
+.company-header .company-identity h1,
+.company-header .company-tab,
+.company-header .company-actions > a,
+.company-header .company-actions > button,
+.company-header .company-tabs,
+.company-header .company-title-row {
+  transition:
+    height 220ms ease,
+    width 220ms ease,
+    font-size 220ms ease,
+    padding 220ms ease,
+    margin 220ms ease;
+}
+.company-header[data-stuck] {
+  padding-top: 8px;
+}
+.company-header[data-stuck] .company-crumb {
+  display: none;
+}
+.company-header[data-stuck] .company-description {
+  max-height: 0;
+  opacity: 0;
+  margin: 0;
+  pointer-events: none;
+}
+.company-header[data-stuck] .company-title-row {
+  margin-top: 0;
+}
+.company-header[data-stuck] .company-identity h1 {
+  font-size: 16px;
+}
+.company-header[data-stuck] .company-avatar {
+  height: 24px;
+  width: 24px;
+  border-radius: 7px;
+  font-size: 11px;
+}
+.company-header[data-stuck] .company-tabs {
+  margin-top: 2px;
+  padding-top: 0;
+}
+.company-header[data-stuck] .company-tab {
+  padding-top: 4px;
+  padding-bottom: 8px;
+}
+.company-header[data-stuck] .company-actions > a,
+.company-header[data-stuck] .company-actions > button {
+  height: 32px;
+}
+.company-header[data-stuck] .company-configure-label {
+  display: none;
+}
+/* Record pages: one line of context above the record's own header. */
+.context-bar {
+  --page-gutter: 0px;
+}
+.context-bar[data-stuck] {
+  padding-block: 0;
+}
+.context-bar[data-stuck]::after {
+  display: none;
+}
+.record-shell .record-content {
+  --sticky-top: 0px;
+}
+@media (max-width: 1023.98px) {
+  .company-content .sticky-page-header {
+    position: relative;
+    top: auto;
+  }
+  .company-content .page-heading-crumbs {
+    display: none;
+  }
+}
+
+.home-scroll,
+.company-shell {
+  scroll-padding-top: var(--pinned-header-height, 24px);
+}
+
+/* Plan header: switcher, plan line and milestone rail. Sticks inside the client
+   content and collapses to a one-line rail while stuck, so the position in the
+   plan stays visible without eating the screen. */
+.plan-header {
+  display: block;
+  z-index: 15;
+  padding-bottom: 12px;
+  transition: padding 220ms ease;
+}
+.plan-header[data-stuck] {
+  padding-block: 8px 10px;
+}
+.plan-header[data-stuck]::after {
+  display: none;
+}
+.plan-rail-wrap {
+  transition: margin 220ms ease;
+}
+.plan-header[data-stuck] .plan-rail-wrap {
+  margin-top: 8px;
+}
+.plan-rail-stage,
+.plan-rail-label {
+  max-height: 48px;
+  overflow: hidden;
+  transition:
+    max-height 220ms ease,
+    opacity 160ms ease;
+}
+.plan-header[data-stuck] .plan-rail-stage,
+.plan-header[data-stuck] .plan-rail-label {
+  max-height: 0;
+  opacity: 0;
+}
+.plan-rail-cell {
+  transition: min-width 220ms ease;
+}
+.plan-header[data-stuck] .plan-rail-cell {
+  min-width: 40px;
+}
+.plan-header ol[aria-label="Marcos do plano"] {
+  transition: padding 220ms ease;
+}
+.plan-header[data-stuck] ol[aria-label="Marcos do plano"] {
+  padding-block: 6px;
+}
+.plan-header .plan-rail-name {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  padding-block: 0;
+  border-top-width: 0;
+  transition:
+    max-height 220ms ease,
+    opacity 160ms ease,
+    padding 220ms ease;
+}
+.plan-header .plan-rail-name[data-always] {
+  max-height: 32px;
+  opacity: 1;
+  padding-block: 6px;
+  border-top-width: 1px;
+}
+@media (min-width: 640px) {
+  .plan-header[data-stuck] .plan-rail-name {
+    max-height: 32px;
+    opacity: 1;
+    padding-block: 6px;
+    border-top-width: 1px;
+  }
+}

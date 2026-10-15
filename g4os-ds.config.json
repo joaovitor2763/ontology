@@ -1,0 +1,13 @@
+{
+  "$schema": "./node_modules/@g4ai/ds/scripts/lint/config.schema.json",
+  "extends": "recommended",
+  "include": ["src"],
+  "exclude": [],
+  "rules": {},
+  "overrides": [
+    {
+      "files": ["src/server/**", "src/shared/lib/format.ts"],
+      "rules": { "number-format": "off" }
+    }
+  ]
+}

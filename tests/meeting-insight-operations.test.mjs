@@ -1,0 +1,44 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {sqliteD1} from './helpers/sqlite-d1.mjs';
+import {apiResponse} from '../src/server/operations/http.ts';
+import {issueIntegrationCredential} from '../src/server/operations/credentials.ts';
+
+test('meeting analysis shares guarded publication, content confirmation and idempotent replay',async t=>{
+ const f=sqliteD1();t.after(()=>f.sql.close());const company='santa-clara';
+ f.sql.prepare("INSERT INTO state_documents(workspace_id,key,version,body) VALUES('default','ontology.workspace.v3',1,?)").run(JSON.stringify({extraMembers:[{id:'admin',email:'admin@example.test',access:'admin'}]}));
+ const state={extraMeetings:[{id:'meeting-fixture',company,title:'Fixture',startsAt:'2026-09-17T10:00:00Z',actions:[],decisions:[]}],notes:{'meeting-fixture':'Primeira decisão.'}};
+ f.sql.prepare("INSERT INTO state_documents(workspace_id,key,version,body) VALUES('default','ontology.engagement.v2',1,?)").run(JSON.stringify(state));
+ const env={DB:f.db,AI_ENABLED:'true',AI_GATEWAY_ACCOUNT_ID:'fixture',AI_GATEWAY_ID:'fixture',AI_GATEWAY_TOKEN:'fixture'};
+ const issue=async scopes=>(await issueIntegrationCredential(f.db,'default','admin@example.test',{name:'Fixture',ownerEmail:'admin@example.test',scopes,companies:[company],expiresAt:new Date(Date.now()+600000).toISOString()})).token;
+ const token=await issue(['engagement:write','meetings:read']);
+ const call=(key,confirmedHash,bearer=token)=>apiResponse(new Request('https://delivery.test/api/v1/meetings/meeting-fixture/analyze',{method:'POST',headers:{authorization:'Bearer '+bearer,'content-type':'application/json','idempotency-key':key},body:JSON.stringify({company,confirmedHash})}),env,['meetings','meeting-fixture','analyze']);
+ let calls=0,changeDuring=false;
+ const update=()=>f.sql.prepare("UPDATE state_documents SET body=?,version=version+1 WHERE key='ontology.engagement.v2'").run(JSON.stringify(state));
+ t.mock.method(globalThis,'fetch',async()=>{calls++;if(changeDuring){state.notes['meeting-fixture']='Alteração durante a geração';update();}return Response.json({status:'completed',model:'fixture',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify({summary:'Resumo',decisions:[],actions:[],risks:[],questions:[]})}]}],usage:{}});});
+ assert.equal((await call('denied',undefined,await issue(['meetings:read']))).status,403);assert.equal(calls,0);
+ const first=await call('first');assert.equal(first.status,200,await first.clone().text());const initial=await first.json();assert.equal(initial.data.reused,false);assert.equal(initial.data.status,'pending');
+ assert.deepEqual(await (await call('first')).json(),initial);assert.equal(calls,1);
+ const reused=await call('reuse');const reusedBody=await reused.json();assert.equal(reusedBody.data.reused,true);assert.equal(reusedBody.data.status,'pending');assert.equal(calls,1);
+ state.notes['meeting-fixture']='Segunda decisão';update();
+ const changed=await call('change');assert.equal(changed.status,409);const hash=(await changed.json()).error.details.sourceHash;assert.ok(hash);assert.equal(calls,1);
+ const confirmed=await call('confirmed',hash);assert.equal(confirmed.status,200);assert.equal(calls,2);
+ assert.equal(f.sql.prepare('SELECT count(*) AS n FROM ai_suggestions').get().n,2);assert.equal(f.sql.prepare('SELECT count(*) AS n FROM ai_runs').get().n,2);
+ state.notes['meeting-fixture']='Terceira decisão';update();const stale=await call('stale');const newHash=(await stale.json()).error.details.sourceHash;
+ changeDuring=true;assert.equal((await call('race',newHash)).status,409);
+ assert.equal(f.sql.prepare('SELECT count(*) AS n FROM ai_suggestions').get().n,2);assert.equal(f.sql.prepare('SELECT count(*) AS n FROM ai_runs').get().n,2);
+ assert.equal(f.sql.prepare("SELECT count(*) AS n FROM operation_receipts WHERE idempotency_key='race'").get().n,0);
+ assert.equal(f.sql.prepare("SELECT count(*) AS n FROM operation_events WHERE type='meetings.analyze'").get().n,2);
+ changeDuring=false;state.extraMeetings[0].google={transcriptDocId:'up-fixture'};update();
+ const count=calls;assert.equal((await call('transcript')).status,403);assert.equal(calls,count);
+ const documentToken=await issue(['engagement:write','meetings:read','documents:read']);
+ assert.equal((await call('missing-file',undefined,documentToken)).status,409);assert.equal(calls,count);
+ f.sql.prepare("INSERT INTO files(id,workspace_id,r2_key,name,size,company) VALUES('up-fixture','default','fixture','Fixture',20,?)").run(company);
+ env.FILES={get:async()=>({text:async()=> 'Transcrição preservada'})};
+ const changedTranscript=await call('transcript-change',undefined,documentToken);assert.equal(changedTranscript.status,409);
+ const transcriptHash=(await changedTranscript.json()).error.details.sourceHash;
+ assert.equal((await call('transcript-confirm',transcriptHash,documentToken)).status,200);
+ f.sql.prepare("UPDATE integration_credentials SET scopes=? WHERE scopes LIKE '%documents:read%'").run(JSON.stringify(['engagement:write','meetings:read']));
+ assert.equal((await call('transcript-confirm',transcriptHash,documentToken)).status,403);
+
+});

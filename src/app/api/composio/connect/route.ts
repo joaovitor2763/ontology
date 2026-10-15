@@ -1,0 +1,3 @@
+import {readRequestJson} from "@/server/connector-body";
+import { composioGuard,composioUserId,publicError } from "@/server/composio-route";import { createAuthLink,toolkit } from "@/server/composio";import { json,problem } from "@/server/context";
+export async function POST(request:Request){const c=await composioGuard(request,true);if("error" in c)return c.error;try{const b=await readRequestJson(request,1024) as {toolkit?:unknown};if(!toolkit(b.toolkit))return problem(400,"Toolkit inválido.");const {redirect,connectedAccountId}=await createAuthLink(c.env,c.workspace,composioUserId(c.workspace,c.member.id),new URL(request.url).origin,b.toolkit);return json({redirect,connectedAccountId});}catch(e){return publicError(e);}}

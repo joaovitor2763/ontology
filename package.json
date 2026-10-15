@@ -1,0 +1,72 @@
+{
+  "name": "ontology-app",
+  "version": "0.1.0",
+  "private": false,
+  "scripts": {
+    "dev": "next dev",
+    "check": "npm run lint && tsc --noEmit && npm test && npm run ds:audit",
+    "lint": "eslint",
+    "ds:audit": "g4os-ds audit",
+    "ds:doctor": "g4os-ds doctor",
+    "test": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.mjs",
+    "build": "next build",
+    "start": "next start",
+    "perf": "node scripts/perf-baseline.mjs",
+    "perf:api": "node scripts/perf-api.mjs",
+    "perf:sweep": "node scripts/perf-sweep-api.mjs",
+    "perf:sweep:pages": "node scripts/perf-sweep-pages.mjs",
+    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "deploy": "npm run deploy:production",
+    "setup:integration-secret": "node scripts/setup-integration-secret.mjs",
+    "deploy:production": "opennextjs-cloudflare build && node scripts/deploy.mjs",
+    "upload": "opennextjs-cloudflare build && opennextjs-cloudflare upload",
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate": "wrangler d1 migrations apply DB --remote"
+  },
+  "dependencies": {
+    "@base-ui/react": "^1.8.0",
+    "@cloudflare/workers-oauth-provider": "^0.10.3",
+    "@g4ai/ds": "^0.9.0",
+    "@modelcontextprotocol/client": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "@opennextjs/cloudflare": "^1.20.6",
+    "jose": "^6.2.12",
+    "lucide-react": "^1.45.0",
+    "next": "^16.3.8",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "^16.3.8",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "wrangler": "^4.131.2"
+  },
+  "license": "MIT",
+  "cloudflare": {
+    "bindings": {
+      "GOOGLE_CLIENT_ID": {
+        "description": "OAuth Web Client ID. Configure Google OAuth e AUTH_MODE=google seguindo DEPLOY.md."
+      },
+      "GOOGLE_CLIENT_SECRET": {
+        "description": "Secret do Google OAuth Web Client. Cadastre como Worker secret, nunca como vari\u00e1vel p\u00fablica."
+      },
+      "GOOGLE_TOKEN_KEY": {
+        "description": "Segredo aleat\u00f3rio para cifrar sess\u00f5es Google. Gere localmente com `openssl rand -hex 32` e cadastre como Worker secret."
+      },
+      "INTEGRATION_SECRET_KEY": {
+        "description": "Chave de assinatura de webhooks. Ap\u00f3s deploy, rode `npm run setup:integration-secret` em terminal interativo."
+      }
+    }
+  },
+  "engines": {
+    "node": ">=24 <25"
+  }
+}
